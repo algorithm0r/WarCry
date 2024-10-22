@@ -70,6 +70,7 @@ class Warrior {
     }
 
     reset(team) {
+        this.removeFromWorld = false; // Added by Reis to fix bug
         this.team = team;
         this.health = 10;
         this.target = null;
