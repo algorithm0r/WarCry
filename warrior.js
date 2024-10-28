@@ -1,15 +1,14 @@
 class Warrior {
     constructor(other) {
         this.radius = 5;
-    
         this.health = 10;
-
         this.maxSpeed = 50;
         this.maxForce = 5;
 
         this.genes = [];
-        for(let i = 0; i < 10; i++) {
-            this.genes.push(new RealGene(other.genes[i]));
+        // Use the genes from `other` if defined, otherwise generate default genes
+        for (let i = 0; i < 10; i++) {
+            this.genes.push(new RealGene(other?.genes[i] || { value: Math.random() })); // Fix to handle undefined `other`
         }
 
         // visual radiuses
@@ -18,7 +17,7 @@ class Warrior {
         this.separationRadius = this.genes[2].value * 200;
         this.chargeRadius = this.genes[3].value * 200;
         this.fleeRadius = this.genes[4].value * 200;
-    
+
         // movement weights
         this.cohesionWeight = this.genes[5].value * 10;
         this.alignmentWeight = this.genes[6].value * 10;
@@ -27,15 +26,12 @@ class Warrior {
         this.fleeWeight = this.genes[9].value * 10;
 
         this.accelerationScale = 1;
-        
         this.target = null;
         this.fleeing = false;
         this.aggression = 0.5;
-        
-    
-
-
     }
+
+
 
     pullWeightsFromHTML() {
         this.cohesionWeight = parseFloat(document.getElementById("cohesion").value);
@@ -70,7 +66,6 @@ class Warrior {
     }
 
     reset(team) {
-        this.removeFromWorld = false; // Added by Reis to fix bug
         this.team = team;
         this.health = 10;
         this.target = null;
