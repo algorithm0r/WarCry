@@ -26,6 +26,17 @@ class Automata {
         this.shelter = { water: 0, seeds: [], plantSeeds: [], meat: 0 };
         for(let i = 0; i < 2000; i++) this.shelter.seeds.push(new Seed({ cell: { x: -1, y: -1 }}));
 
+        // Initialize band and combat managers - Added by Reis
+        this.bandManager = new BandManager();
+        this.combatManager = new CombatManager();
+
+        // Set up initial combat, added to ensure agents spawn at the start
+        this.bandManager.prepareBandsForCombat(
+            this.bandManager.bands[0],
+            this.bandManager.bands[1]
+        ); // Added by Reis ^
+
+
         // agents
         this.seeds = [];
         this.humans = [];
