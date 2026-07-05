@@ -18,10 +18,20 @@ var RealGene = class RealGene {
 };
 
 // A genome is a plain array of RealGene. These helpers keep band-building in one place.
-// GENOME LAYOUT (control experiment — 10 genes):
+// GENOME LAYOUT (control experiment — 12 genes):
 //   0 cohesionRadius   1 alignmentRadius  2 separationRadius  3 chargeRadius  4 fleeRadius
 //   5 cohesionWeight   6 alignmentWeight  7 separationWeight  8 chargeWeight  9 fleeWeight
-var GENOME_LENGTH = 10;
+//   10 aggression      (P(stand & fight) on being hit; 1 = never routs, 0 = flees on any hit)
+//   11 bloodlustWeight (pull toward the battlefield centre of mass — keeps the melee engaged
+//                       WITHOUT bounding the arena, so retreat stays a real option)
+var GENOME_LENGTH = 12;
+
+// short labels for the 12 genes (for histograms / readouts), in genome order
+var GENE_NAMES = [
+  'cohR', 'alnR', 'sepR', 'chgR', 'fleeR',
+  'cohW', 'alnW', 'sepW', 'chgW', 'fleeW',
+  'aggr', 'blood',
+];
 
 function randomGenome() {
   const g = [];

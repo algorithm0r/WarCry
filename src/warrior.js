@@ -28,10 +28,13 @@ var Warrior = class Warrior {
     this.separationWeight = g[7].value * W;
     this.chargeWeight     = g[8].value * W;
     this.fleeWeight       = g[9].value * W;
+    this.aggression       = g[10].value;   // P(stand & fight) when hit — now heritable
+    this.bloodlustWeight  = g[11].value * W; // pull toward the battlefield centre of mass
   }
 
-  // place this warrior on its team's start edge, facing the enemy — called each match
-  reset(team) {
+  // place this warrior on its team's start edge, facing the enemy — called each match.
+  // `width`/`height` are the arena dims of the Match this warrior belongs to.
+  reset(team, width, height) {
     this.team = team;                     // true = A (left, red), false = B (right, blue)
     this.health = PARAMETERS.health;
     this.target = null;
@@ -39,10 +42,11 @@ var Warrior = class Warrior {
     this.dead = false;
     this.fled = false;
     this.removeFromWorld = false;
-    const W = PARAMETERS.worldWidth, H = PARAMETERS.worldHeight;
-    const margin = Math.random() * W / 16;
-    this.x = team ? margin : W - margin;
-    this.y = Math.random() * H;
+    this.arenaW = width;
+    this.arenaH = height;
+    const margin = Math.random() * width / 16;
+    this.x = team ? margin : width - margin;
+    this.y = Math.random() * height;
     this.velocity = {                     // an initial nudge toward the enemy line
       x: (team ? 1 : -1) * Math.random() * this.maxSpeed,
       y: Math.random() * this.maxSpeed / 2 * randomSign(),
@@ -58,30 +62,30 @@ var Warrior = class Warrior {
       this.removeFromWorld = true;
       return;
     }
-    if (!this.fleeing && Math.random() > PARAMETERS.aggression) this.fleeing = true;
+    if (!this.fleeing && Math.random() > this.aggression) this.fleeing = true;
   }
 
   outOfBounds() {
-    return this.x < 0 || this.x > PARAMETERS.worldWidth ||
-           this.y < 0 || this.y > PARAMETERS.worldHeight;
+    return this.x < 0 || this.x > this.arenaW ||
+           this.y < 0 || this.y > this.arenaH;
   }
 
-  // advance one tick inside `world`. Reads world.warriors for neighbours; pushes contacts
-  // into world.combats (deduped: only team-A members enqueue a pair) for the world to resolve.
-  step(world) {
+  // advance one tick inside `match`. Reads match.warriors for neighbours; pushes contacts
+  // into match.combats (deduped: only team-A members enqueue a pair) for the match to resolve.
+  step(match) {
     const cohesion = { x: 0, y: 0 }, alignment = { x: 0, y: 0 };
-    const separation = { x: 0, y: 0 }, charge = { x: 0, y: 0 };
+    const separation = { x: 0, y: 0 }, charge = { x: 0, y: 0 }, bloodlust = { x: 0, y: 0 };
     let cohesionCount = 0, alignmentCount = 0;
     this.target = null;
 
-    const ws = world.warriors;
+    const ws = match.warriors;
     for (let i = 0; i < ws.length; i++) {
       const ent = ws[i];
       if (ent === this) continue;
       const dist = distance(this, ent);
 
       if (dist < this.radius + ent.radius && ent.team !== this.team && this.team) {
-        world.combats.push([this, ent]);   // contact -> a fight, resolved by the world
+        match.combats.push([this, ent]);   // contact -> a fight, resolved by the match
       }
 
       if (ent.team === this.team) {
@@ -104,14 +108,18 @@ var Warrior = class Warrior {
       else { charge.x = this.x - this.target.x; charge.y = this.y - this.target.y; }
     }
 
-    normalize(cohesion); normalize(alignment); normalize(separation); normalize(charge);
+    // bloodlust: a pull toward where the fighting is (centre of mass of all warriors)
+    if (match.centerOfMass) { bloodlust.x = match.centerOfMass.x - this.x; bloodlust.y = match.centerOfMass.y - this.y; }
 
-    // routed warriors are single-minded: run from the nearest enemy. Others blend all urges.
+    normalize(cohesion); normalize(alignment); normalize(separation); normalize(charge); normalize(bloodlust);
+
+    // routed warriors are single-minded: run from the nearest enemy (retreat stays a clean,
+    // separate mode). The engaged blend adds bloodlust so the melee sustains instead of dispersing.
     const steer = this.fleeing
       ? { x: charge.x * this.fleeWeight, y: charge.y * this.fleeWeight }
       : {
-          x: cohesion.x * this.cohesionWeight + alignment.x * this.alignmentWeight + separation.x * this.separationWeight + charge.x * this.chargeWeight,
-          y: cohesion.y * this.cohesionWeight + alignment.y * this.alignmentWeight + separation.y * this.separationWeight + charge.y * this.chargeWeight,
+          x: cohesion.x * this.cohesionWeight + alignment.x * this.alignmentWeight + separation.x * this.separationWeight + charge.x * this.chargeWeight + bloodlust.x * this.bloodlustWeight,
+          y: cohesion.y * this.cohesionWeight + alignment.y * this.alignmentWeight + separation.y * this.separationWeight + charge.y * this.chargeWeight + bloodlust.y * this.bloodlustWeight,
         };
 
     normalize(steer);
@@ -120,8 +128,8 @@ var Warrior = class Warrior {
     this.velocity.y += steer.y;
     limit(this.velocity, this.maxSpeed);
 
-    this.x += this.velocity.x * world.dt;
-    this.y += this.velocity.y * world.dt;
+    this.x += this.velocity.x * PARAMETERS.dt;
+    this.y += this.velocity.y * PARAMETERS.dt;
 
     if (this.outOfBounds()) { this.fled = true; this.removeFromWorld = true; }
   }

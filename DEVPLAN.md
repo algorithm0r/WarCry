@@ -15,44 +15,54 @@ die. Every behavioural coefficient is a **gene**, and the **band is the unit of 
   band-consistent mapping from cry → behaviour, i.e. a proto-**language**?
 
 ## Built
-- Scaffolded from engine v2 (vanilla-JS canvas + standard DB client), old build's good parts
-  ported in: flocking + charge/flee genes (`warrior.js`), band population + combat resolution +
-  generational group-selection GA fused into one state owner (`world.js`), `RealGene` (`gene.js`).
-- Runs in-browser (arena + HUD via `observer.js`) and headless (`smoketest.mjs`, `runner.mjs`)
-  from the SAME `src/` core via `vm`.
+- Scaffolded from engine v2 (vanilla-JS canvas + standard DB client). Control experiment (H1):
+  12-gene warriors (flocking + charge/flee + aggression + bloodlust), band population, isolated
+  `Match` contests run concurrently, head-to-head tournament group selection, per-gene histograms.
+- Combat is decisive (kills/match ~40+); aggression and bloodlust both evolve upward.
+- Runs in-browser (tiled multi-match arena + gene histograms + HUD) and headless
+  (`smoketest.mjs`, `runner.mjs`) from the SAME `src/` core via `vm`.
 
 ## Not yet built
 - War cries (H2) — no signalling channel yet.
-- Decisive combat: current dynamics are **rout-dominated** (see Stage 1 open item).
-- Baseline data run + analysis.
+- A multi-rep baseline batch in Mongo (single runs are noisy) + analysis.
+- Visual confirmation of the browser layout (render unverified this session).
 
-## Genome (current — 10 genes, control experiment)
+## Genome (current — 12 genes, control experiment)
 | idx | gene | idx | gene |
 |----|------|----|------|
-| 0 | cohesionRadius | 5 | cohesionWeight |
-| 1 | alignmentRadius | 6 | alignmentWeight |
-| 2 | separationRadius | 7 | separationWeight |
-| 3 | chargeRadius | 8 | chargeWeight |
-| 4 | fleeRadius | 9 | fleeWeight |
+| 0 | cohesionRadius | 6 | alignmentWeight |
+| 1 | alignmentRadius | 7 | separationWeight |
+| 2 | separationRadius | 8 | chargeWeight |
+| 3 | chargeRadius | 9 | fleeWeight |
+| 4 | fleeRadius | 10 | aggression (P stand & fight) |
+| 5 | cohesionWeight | 11 | bloodlust (pull to melee centre) |
 
-Radii = gene·`radiusScale`; weights = gene·`weightScale` (see `params.js`).
+Radii = gene·`radiusScale`; weights = gene·`weightScale` (see `params.js`). Aggression is a raw
+[0,1] probability. Bloodlust keeps warriors engaged **without** bounding the arena — so retreat
+stays a real, evolvable option (essential for H2).
+
+## Selection (current)
+Head-to-head **tournament**, all matches of a generation run **concurrently** (each an isolated
+`Match`): bands pair off, winner = more damage inflicted (`kills×killWeight + routs×routWeight`),
+**loser band dies**, winner survives intact + spawns one mutated offspring into the vacated slot.
+Per-gene value histograms are recorded each generation (`world.history[*].geneHists`).
 
 ## Stages
 
 ### Stage 1 — Control experiment: evolve bands to fight  [ TESTING ]
 - [x] Port flocking + charge/flee as genes (`warrior.js`), no DOM / no self-draw
-- [x] Band population, random pairing, combat resolution, generational GA (`world.js`)
-- [x] Per-generation fitness metric + live graph + DB packet (`datamanager.js`)
-- [x] `smoketest.mjs` asserts real invariants (GA advances, casualty accounting balances,
-      history well-formed, combat occurs) — **PASS** (2026-07-04)
-- [ ] **Make combat decisive.** Today warriors rout on the first hit (`aggression` fixed 0.5)
-      and flee off-field before dying → ~0 deaths, fitness flat. Options: make **aggression a
-      gene** (11th gene — lets fight-vs-flee evolve, arguably core to H1), raise contact
-      lethality, shrink the arena, or add a "morale" that scales with local ally density.
-- [ ] Baseline: `node runner.mjs --reps 30 --gens 200`; confirm mean fitness climbs and
-      inspect the evolved genome (do chargers win?).
-**Done when:** from random genomes, mean band fitness reliably rises over generations and the
-evolved bands visibly close-and-fight (not just skirmish-and-scatter); a baseline batch is in Mongo.
+- [x] Head-to-head tournament selection: loser band dies, winner survives + reproduces (`world.js`)
+- [x] All matches of a generation run concurrently, each an isolated `Match` (`match.js`)
+- [x] Per-generation metrics + live graph + DB packet, incl. per-gene histograms (`datamanager.js`, `world.geneHistograms`)
+- [x] `smoketest.mjs` asserts 5 real invariants (GA advances, casualty accounting balances,
+      history well-formed, combat occurs, gene histograms well-formed) — **PASS** (2026-07-04)
+- [x] **Made combat decisive:** `aggression` (gene 10) + `bloodlust` (gene 11) + `maxSpeed`
+      65→30. Kills/match now ~40+ (was ~0); aggression/bloodlust both evolve up.
+- [ ] Eyeball the browser layout (12-match grid, gene histograms, FPS) — render unverified.
+- [ ] Baseline: `node runner.mjs --reps 30 --gens 200`; confirm trends hold across reps (single
+      20-gen runs are noisy) and inspect the evolved genome via the histograms.
+**Done when:** from random genomes, fighting drives reliably rise over generations across a
+multi-rep batch (not one noisy run) and the bands visibly close-and-fight; batch is in Mongo.
 
 ### Stage 2 — War cries + evolved response (H2)  [ PLANNED ]
 Add a signalling channel and make both ends genetic.

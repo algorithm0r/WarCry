@@ -14,6 +14,9 @@ var GameEngine = class GameEngine {
     this.ctx = null;
     this.running = false;
     this.tick = 0;
+    this.fps = 0;
+    this._frames = 0;
+    this._fpsT0 = 0;
   }
 
   init(ctx) { this.ctx = ctx; }
@@ -23,10 +26,18 @@ var GameEngine = class GameEngine {
   // browser entry — render-locked loop with fast-forward
   start() {
     this.running = true;
+    const now0 = (typeof performance !== 'undefined') ? performance.now() : 0;
+    this._fpsT0 = now0;
     const loop = () => {
       if (!this.running) return;
       for (let i = 0; i < PARAMETERS.updatesPerDraw; i++) this.update();
       this.draw();
+      // rendered frames per second, refreshed twice a second (browser-only)
+      if (typeof performance !== 'undefined') {
+        this._frames++;
+        const now = performance.now(), dt = now - this._fpsT0;
+        if (dt >= 500) { this.fps = Math.round(this._frames * 1000 / dt); this._frames = 0; this._fpsT0 = now; }
+      }
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);

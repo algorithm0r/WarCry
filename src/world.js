@@ -1,32 +1,26 @@
 'use strict';
-// The World holds ALL simulation state and advances it. It is an engine entity (has
-// update) but draws nothing — rendering is the Observer's job. This is what lets the exact
-// same file run headlessly via vm with no canvas.
+// The World holds ALL simulation state and advances it. It is an engine entity (has update)
+// but draws nothing — rendering is the Observer's job. This is what lets the exact same file
+// run headlessly via vm with no canvas.
 //
-// It fuses the three managers of the old build into one owner of state (conventions: "state
-// has one owner"):
+// It owns:
 //   - a POPULATION of bands (each band = an array of genomes) — the unit of group selection
-//   - the CURRENT MATCH: two bands instantiated as living Warriors that fight to a finish
-//   - a GENERATION loop: every band fights once, is scored, and the elite reproduce
-//
-// Control experiment: bands start from random genomes. If fighting strategies (charge to
-// contact, hold formation, rout the enemy) are selectable, mean fitness should climb.
+//   - a GENERATION of Matches run CONCURRENTLY (every band fights one head-to-head contest at
+//     the same time; each Match is isolated so warriors only fight their own opponent)
+//   - the tournament: when all matches finish, each LOSER band dies and each WINNER band
+//     survives intact + spawns a mutated offspring into the vacated slot.
 var World = class World {
   constructor(width, height) {
-    this.width = width;
+    this.width = width;         // display region (Observer tiles the matches into this)
     this.height = height;
-    this.dt = PARAMETERS.dt;
 
     this.generation = 0;
     this.history = [];          // one entry per completed generation (the plotted/saved metric)
-    this.lastMatch = null;      // casualty tally of the most recent match (smoketest invariant)
+    this.lastMatch = null;      // a representative match result (smoketest invariant + HUD)
 
-    // seed the founding population: numBands bands of random genomes
     this.bands = [];
     for (let b = 0; b < PARAMETERS.numBands; b++) this.bands.push(this.makeRandomBand());
 
-    this.warriors = [];
-    this.combats = [];
     this.startGeneration();
   }
 
@@ -38,120 +32,65 @@ var World = class World {
     return band;
   }
 
-  // offspring band: a mutated copy of every genome in the parent — keeps the band's genetic
-  // profile while injecting variation (asexual group reproduction)
+  // offspring band: a mutated copy of every genome in the parent
   reproduceBand(band) { return band.map((genome) => mutatedClone(genome)); }
 
   // ---- generation scheduling -------------------------------------------------------------
   startGeneration() {
-    // random pairing: every band fights exactly once (odd band out gets a bye = 0 fitness)
+    // random pairing; each pair becomes a Match that runs concurrently this generation.
+    // numBands is even by schema, so no byes in practice.
     const order = shuffleArray(this.bands.map((_, i) => i));
-    this.pairings = [];
-    for (let i = 0; i + 1 < order.length; i += 2) this.pairings.push([order[i], order[i + 1]]);
-    this.pairIndex = 0;
-    this.fitness = new Array(this.bands.length).fill(0);
-    this.survivorsArr = new Array(this.bands.length).fill(0);
-    this.wins = new Array(this.bands.length).fill(0);
-    this.startMatch(this.pairings[this.pairIndex]);
+    this.matches = [];
+    for (let i = 0; i + 1 < order.length; i += 2) {
+      this.matches.push(new Match(this.bands[order[i]], this.bands[order[i + 1]], order[i], order[i + 1]));
+    }
   }
 
-  startMatch(pair) {
-    this.activeA = pair[0];
-    this.activeB = pair[1];
-    this.matchTick = 0;
-    this.warriors = [];
-    this.combats = [];
-    this.tally = {
-      A: { alive: PARAMETERS.bandSize, dead: 0, fled: 0 },
-      B: { alive: PARAMETERS.bandSize, dead: 0, fled: 0 },
-    };
-    for (const genome of this.bands[this.activeA]) this.spawn(genome, true);
-    for (const genome of this.bands[this.activeB]) this.spawn(genome, false);
-  }
-
-  spawn(genome, team) {
-    const w = new Warrior(genome);
-    w.reset(team);
-    this.warriors.push(w);
-  }
-
-  // ---- per-tick advance ------------------------------------------------------------------
+  // ---- per-tick advance: step every unfinished match; evolve when all are done ------------
   update(engine) {
-    this.matchTick++;
-    this.combats = [];
-
-    for (const w of this.warriors) w.step(this);
-    this.resolveCombats();
-
-    // reap the fallen and the routed, keeping the team tallies exact
-    const survivors = [];
-    for (const w of this.warriors) {
-      if (w.removeFromWorld) {
-        const t = w.team ? this.tally.A : this.tally.B;
-        if (w.dead) { t.dead++; t.alive--; }
-        else if (w.fled) { t.fled++; t.alive--; }
-      } else {
-        survivors.push(w);
-      }
+    let allDone = true;
+    for (const m of this.matches) {
+      m.update();
+      if (!m.done) allDone = false;
     }
-    this.warriors = survivors;
-
-    if (this.matchOver()) this.endMatch();
+    if (allDone) this.evolve();
   }
 
-  // each contact pair: a coin-flip decides who takes the blow (as in the old CombatManager)
-  resolveCombats() {
-    shuffleArray(this.combats);
-    for (const [a, b] of this.combats) {
-      if (!a.removeFromWorld && !b.removeFromWorld) (randomInt(2) ? b : a).hit();
-    }
-  }
-
-  matchOver() {
-    return this.tally.A.alive <= 0 || this.tally.B.alive <= 0 ||
-           this.matchTick >= PARAMETERS.matchTickCap;
-  }
-
-  // ---- match / generation resolution -----------------------------------------------------
-  endMatch() {
-    const A = this.tally.A, B = this.tally.B;
-    this.lastMatch = { a: this.activeA, b: this.activeB, A: Object.assign({}, A), B: Object.assign({}, B) };
-
-    // fitness = survivors, plus a decisive bonus for wiping the enemy (a win)
-    this.fitness[this.activeA] = A.alive + (B.alive <= 0 && A.alive > 0 ? PARAMETERS.winBonus : 0);
-    this.fitness[this.activeB] = B.alive + (A.alive <= 0 && B.alive > 0 ? PARAMETERS.winBonus : 0);
-    this.survivorsArr[this.activeA] = A.alive;
-    this.survivorsArr[this.activeB] = B.alive;
-    if (A.alive > B.alive) this.wins[this.activeA] = 1;
-    else if (B.alive > A.alive) this.wins[this.activeB] = 1;
-
-    this.pairIndex++;
-    if (this.pairIndex < this.pairings.length) this.startMatch(this.pairings[this.pairIndex]);
-    else this.evolve();
-  }
-
-  // group selection: rank bands by fitness, let the elite fraction seed the next generation
+  // group selection, head-to-head: for every match the LOSER band dies and the WINNER band
+  // both survives (carried over intact) and reproduces a mutated offspring into the vacated
+  // slot. Population size is conserved; only winning lineages persist.
   evolve() {
-    const ranked = this.bands.map((_, i) => i).sort((p, q) => this.fitness[q] - this.fitness[p]);
-    const eliteCount = Math.max(1, Math.floor(this.bands.length * PARAMETERS.eliteFraction));
-    const elite = ranked.slice(0, eliteCount);
-
     const next = [];
-    let k = 0;
-    while (next.length < this.bands.length) {
-      next.push(this.reproduceBand(this.bands[elite[k % elite.length]]));
-      k++;
+    const dmgs = [], survs = [];
+    let deaths = 0;
+    for (const m of this.matches) {
+      const r = m.result;
+      const winnerBand = this.bands[r.winner];
+      next.push(winnerBand);                       // winner lives on (elitism)
+      next.push(this.reproduceBand(winnerBand));   // + offspring fills the dead loser's slot
+      dmgs.push(r.dmgA, r.dmgB);
+      survs.push(r.A.alive, r.B.alive);
+      deaths += r.deaths;
     }
+    // safety for an odd population (schema keeps numBands even, so normally a no-op)
+    while (next.length < this.bands.length) next.push(this.reproduceBand(next[randomInt(next.length)]));
+    next.length = this.bands.length;
 
-    const best = this.fitness[ranked[0]];
-    const mean = this.fitness.reduce((s, f) => s + f, 0) / this.fitness.length;
-    const meanSurvivors = this.survivorsArr.reduce((s, v) => s + v, 0) / this.survivorsArr.length;
+    this.lastMatch = this.matches[0].result;
+    const best = Math.max.apply(null, dmgs);
+    const meanDamage = dmgs.reduce((s, v) => s + v, 0) / dmgs.length;
+    const meanSurvivors = survs.reduce((s, v) => s + v, 0) / survs.length;
     this.history.push({
       generation: this.generation,
-      bestFitness: best,
-      meanFitness: mean,
+      bestFitness: best,                    // best single-band damage this generation
+      meanFitness: meanDamage,              // mean damage inflicted (the plotted metric)
       meanSurvivors: meanSurvivors,
-      wins: this.wins.reduce((s, w) => s + w, 0),
+      meanKills: deaths / Math.max(1, this.matches.length),  // avg deaths per match
+      meanAggression: this.meanGene(10),    // watch fight-vs-flee evolve
+      meanChargeWeight: this.meanGene(8),    // ...and the will to close to contact
+      meanBloodlust: this.meanGene(11),      // ...and the pull into the melee
+      wins: this.matches.length,             // one winner per match
+      geneHists: this.geneHistograms(),      // full per-gene distributions this generation
     });
 
     this.bands = next;
@@ -160,10 +99,31 @@ var World = class World {
   }
 
   // ---- read-only views (Observer + DataManager) ------------------------------------------
-  fleeingCount(team) {
-    let n = 0;
-    for (const w of this.warriors) if (w.team === team && w.fleeing) n++;
-    return n;
+  // mean value of gene `index` across every warrior genome in the current population
+  meanGene(index) {
+    let sum = 0, n = 0;
+    for (const band of this.bands) for (const genome of band) { sum += genome[index].value; n++; }
+    return n ? sum / n : 0;
+  }
+
+  // per-gene value distribution across the whole population: returns GENOME_LENGTH rows, each
+  // a `histBins`-length array of fractions summing to 1. Recorded each generation so we can
+  // watch selection sculpt each gene's distribution over time (saved to DB + drawn in-browser).
+  geneHistograms() {
+    const bins = PARAMETERS.histBins;
+    const hists = [];
+    for (let g = 0; g < GENOME_LENGTH; g++) {
+      const row = new Array(bins).fill(0);
+      let n = 0;
+      for (const band of this.bands) for (const genome of band) {
+        let b = Math.floor(genome[g].value * bins);
+        if (b >= bins) b = bins - 1; else if (b < 0) b = 0;
+        row[b]++; n++;
+      }
+      if (n) for (let b = 0; b < bins; b++) row[b] /= n;
+      hists.push(row);
+    }
+    return hists;
   }
 
   latest() { return this.history.length ? this.history[this.history.length - 1] : null; }

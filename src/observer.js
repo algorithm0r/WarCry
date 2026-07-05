@@ -1,6 +1,7 @@
 'use strict';
-// The view. Reads World state and draws it; never mutates the model. Keeping all rendering
-// here (instead of warriors drawing themselves) is what makes the World headless-safe.
+// The view. Reads World state and draws it; never mutates the model. All of a generation's
+// matches run at once, so the arena region is tiled into a grid — one cell per contest, each
+// match's full sim arena scaled down into its cell. HUD (generation + aggregates) on the right.
 var Observer = class Observer {
   constructor(world) { this.world = world; }
 
@@ -8,74 +9,67 @@ var Observer = class Observer {
 
   draw(ctx) {
     const w = this.world;
-    // arena boundary
-    ctx.strokeStyle = '#222933';
-    ctx.strokeRect(0.5, 0.5, w.width, w.height);
+    const n = w.matches.length;
+    const cols = Math.ceil(Math.sqrt(n));
+    const rows = Math.ceil(n / cols);
+    const tileW = w.width / cols, tileH = w.height / rows;
 
-    // warriors
-    for (const warrior of w.warriors) {
-      ctx.beginPath();
-      ctx.fillStyle = warrior.team
-        ? (warrior.fleeing ? '#ff9a9a' : '#be0000')   // team A: blood red / pink when routed
-        : (warrior.fleeing ? '#9ad0ff' : '#2b6cf6');  // team B: blue / light blue when routed
-      ctx.arc(warrior.x, warrior.y, warrior.radius, 0, TAU, false);
-      ctx.fill();
-
-      const speed = length(warrior.velocity) || 1;    // heading tick
-      ctx.strokeStyle = '#0b0e13';
-      ctx.beginPath();
-      ctx.moveTo(warrior.x, warrior.y);
-      ctx.lineTo(warrior.x + warrior.velocity.x / speed * warrior.radius,
-                 warrior.y + warrior.velocity.y / speed * warrior.radius);
-      ctx.stroke();
+    for (let i = 0; i < n; i++) {
+      const m = w.matches[i];
+      const ox = (i % cols) * tileW, oy = Math.floor(i / cols) * tileH;
+      this.drawMatch(ctx, m, ox, oy, tileW, tileH);
     }
-
     this.drawHUD(ctx);
   }
 
-  drawHUD(ctx) {
-    const w = this.world, x = w.width + 20;
-    ctx.fillStyle = '#cdd2da';
-    ctx.font = '13px system-ui, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText('Generation ' + w.generation, x, 24);
-    ctx.font = '11px system-ui, sans-serif';
-    ctx.fillStyle = '#8a8f98';
-    ctx.fillText('match band ' + w.activeA + ' vs band ' + w.activeB +
-      '   (' + (w.pairIndex + 1) + '/' + w.pairings.length + ')   tick ' + w.matchTick, x, 42);
+  drawMatch(ctx, m, ox, oy, tileW, tileH) {
+    const sx = tileW / m.width, sy = tileH / m.height;
+    // cell border (dimmed once the contest is decided)
+    ctx.strokeStyle = m.done ? '#1b2028' : '#2b3440';
+    ctx.strokeRect(ox + 0.5, oy + 0.5, tileW - 1, tileH - 1);
 
-    this.drawTeam(ctx, x, 60, 'Band ' + w.activeA + ' (red)', w.tally.A, w.fleeingCount(true), '#be0000');
-    this.drawTeam(ctx, x, 150, 'Band ' + w.activeB + ' (blue)', w.tally.B, w.fleeingCount(false), '#2b6cf6');
+    const r = Math.max(1, 5 * Math.min(sx, sy));  // warrior dot, scaled to the cell
+    for (const warrior of m.warriors) {
+      ctx.fillStyle = warrior.team
+        ? (warrior.fleeing ? '#ff9a9a' : '#be0000')
+        : (warrior.fleeing ? '#9ad0ff' : '#2b6cf6');
+      ctx.beginPath();
+      ctx.arc(ox + warrior.x * sx, oy + warrior.y * sy, r, 0, TAU, false);
+      ctx.fill();
+    }
 
-    const last = w.latest();
-    if (last) {
-      ctx.fillStyle = '#cdd2da';
-      ctx.font = '11px system-ui, sans-serif';
-      ctx.fillText('last gen  best ' + last.bestFitness.toFixed(0) +
-        '   mean surv ' + last.meanSurvivors.toFixed(1) +
-        '   wins ' + last.wins, x, 250);
+    if (m.done) {   // mark the winner
+      ctx.fillStyle = m.result.winner === m.aIndex ? '#be0000' : '#2b6cf6';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.fillText('band ' + m.result.winner + ' wins', ox + 4, oy + tileH - 5);
     }
   }
 
-  drawTeam(ctx, x, y, label, tally, fleeing, color) {
-    const bandSize = PARAMETERS.bandSize, barW = 220, barH = 12, gap = 6;
-    ctx.strokeStyle = color;
-    ctx.strokeRect(x - 3, y - 4, barW + 6, barH * 4 + gap * 3 + 6);
-    ctx.fillStyle = color;
-    ctx.font = '11px system-ui, sans-serif';
-    ctx.fillText(label, x, y + 8);
-    this.bar(ctx, x, y + barH + gap * 0.5, barW, barH, tally.alive, bandSize, '#4fd28a', 'alive ' + tally.alive);
-    this.bar(ctx, x, y + barH * 2 + gap * 1.5, barW, barH, tally.dead, bandSize, '#5a626e', 'dead ' + tally.dead);
-    this.bar(ctx, x, y + barH * 3 + gap * 2.5, barW, barH, fleeing, bandSize, '#e6a15a', 'fleeing ' + fleeing);
-  }
-
-  bar(ctx, x, y, w, h, value, total, color, label) {
-    ctx.fillStyle = '#161b22';
-    ctx.fillRect(x, y, w, h);
-    ctx.fillStyle = color;
-    ctx.fillRect(x, y, (value / total) * w, h);
+  drawHUD(ctx) {
+    // drawn in the open space BELOW the arena (the right column is the gene histograms now)
+    const w = this.world, x = 16, y0 = w.height + 26;
+    const done = w.matches.filter((m) => m.done).length;
+    const fps = (typeof gameEngine !== 'undefined' && gameEngine.fps) ? gameEngine.fps : 0;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
     ctx.fillStyle = '#cdd2da';
-    ctx.font = '10px system-ui, sans-serif';
-    ctx.fillText(label, x + 4, y + h - 2);
+    ctx.font = '16px system-ui, sans-serif';
+    ctx.fillText('Generation ' + w.generation, x, y0);
+    ctx.font = '11px system-ui, sans-serif';
+    ctx.fillStyle = '#8a8f98';
+    ctx.fillText(w.matches.length + ' contests — ' + done + ' decided', x, y0 + 20);
+    ctx.fillText('fps ' + fps + '   (×' + PARAMETERS.updatesPerDraw + ' updates/frame)', x, y0 + 36);
+
+    const last = w.latest();
+    if (last) {
+      const lines = [
+        'last generation:',
+        '  kills/match  ' + last.meanKills.toFixed(2),
+        '  mean dmg     ' + last.meanFitness.toFixed(1),
+        '  mean surv    ' + last.meanSurvivors.toFixed(1),
+      ];
+      ctx.fillStyle = '#cdd2da';
+      for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], x, y0 + 60 + i * 16);
+    }
   }
 };

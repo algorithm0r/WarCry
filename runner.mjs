@@ -20,7 +20,7 @@ const gensOverride = parseInt(flag('gens', '0'), 10);
 // because everything is declared `var` / `var X = class X` — no const->var patch needed)
 const ctx = { Math, console, Date };
 vm.createContext(ctx);
-for (const f of ['util.js', 'params.js', 'gene.js', 'engine.js', 'warrior.js', 'world.js']) {
+for (const f of ['util.js', 'params.js', 'gene.js', 'engine.js', 'warrior.js', 'match.js', 'world.js']) {
   vm.runInContext(readFileSync(path.join(__dirname, 'src', f), 'utf8'), ctx, { filename: f });
 }
 

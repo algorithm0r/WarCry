@@ -10,7 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ctx = { Math, console, Date };
 vm.createContext(ctx);
 // same DOM-free sim core the browser loads (order matters: util -> params -> gene -> ... )
-for (const f of ['util.js', 'params.js', 'gene.js', 'engine.js', 'warrior.js', 'world.js']) {
+for (const f of ['util.js', 'params.js', 'gene.js', 'engine.js', 'warrior.js', 'match.js', 'world.js']) {
   vm.runInContext(readFileSync(path.join(__dirname, 'src', f), 'utf8'), ctx, { filename: f });
 }
 
@@ -18,7 +18,7 @@ const P = ctx.PARAMETERS;
 const world = new ctx.World(P.worldWidth, P.worldHeight);
 const engine = new ctx.GameEngine();
 
-const TARGET_GENS = 5;
+const TARGET_GENS = 20;
 const tickCap = TARGET_GENS * Math.ceil(P.numBands / 2) * P.matchTickCap * 2;
 let t = 0;
 for (; t < tickCap && world.generation < TARGET_GENS; t++) { engine.tick = t + 1; world.update(engine); }
@@ -40,12 +40,23 @@ checks.push(['generation history well-formed', wellFormed]);
 // 4. combat actually happens (some generation took casualties)
 const fought = world.history.some((h) => h.meanSurvivors < P.bandSize);
 checks.push(['combat occurs (casualties taken)', fought]);
+// 5. gene histograms recorded correctly (12 genes x histBins rows, each summing to ~1)
+const histsOk = world.history.every((h) => Array.isArray(h.geneHists) &&
+  h.geneHists.length === ctx.GENOME_LENGTH &&
+  h.geneHists.every((row) => row.length === P.histBins &&
+    Math.abs(row.reduce((s, v) => s + v, 0) - 1) < 1e-9));
+checks.push(['gene histograms well-formed (12 x ' + P.histBins + ', normalised)', histsOk]);
 
 const first = world.history[0], last = world.history[world.history.length - 1];
-console.log('smoke: gens=' + world.generation + ' ticks=' + t +
-  ' meanFit gen0=' + (first ? first.meanFitness.toFixed(1) : 'NA') +
-  ' -> genN=' + (last ? last.meanFitness.toFixed(1) : 'NA') +
-  ' | lastMatch A(a/d/f)=' + (lm ? lm.A.alive + '/' + lm.A.dead + '/' + lm.A.fled : 'NA') +
+const trend = (key) => (first ? first[key].toFixed(2) : 'NA') + ' -> ' + (last ? last[key].toFixed(2) : 'NA');
+console.log('smoke: gens=' + world.generation + ' ticks=' + t);
+console.log('  meanDamage     ' + trend('meanFitness'));
+console.log('  meanKills/match ' + trend('meanKills'));
+console.log('  meanSurvivors  ' + trend('meanSurvivors'));
+console.log('  meanAggression ' + trend('meanAggression') + '   (gene 10: 1=never routs)');
+console.log('  meanChargeWt   ' + trend('meanChargeWeight'));
+console.log('  meanBloodlust  ' + trend('meanBloodlust') + '   (gene 11: pull to melee centre)');
+console.log('  lastMatch A(a/d/f)=' + (lm ? lm.A.alive + '/' + lm.A.dead + '/' + lm.A.fled : 'NA') +
   ' B=' + (lm ? lm.B.alive + '/' + lm.B.dead + '/' + lm.B.fled : 'NA'));
 for (const [name, ok] of checks) console.log('  [' + (ok ? 'PASS' : 'FAIL') + '] ' + name);
 
